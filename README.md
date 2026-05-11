@@ -1,5 +1,6 @@
 
 [English](README.md) | [简体中文](README_CN.md)
+
 # DevOps-Based IT Project Delivery Performance Measurement Platform for Telecommunications Enterprises
 This system is designed for large-scale enterprise management and is developed using Java 8, Spring Boot 2.7, Vue 3, and ECharts as its core technology stack. The front-end interface references the common design style of enterprise-level management systems, employing a layout combining a top bar, left navigation area, secondary menu area, and main content area, which effectively meets the functional display requirements. The back-end is modularly designed based on domain-based partitioning, breaking down system business logic into multiple independently running Spring Boot services to enhance the clarity of the system structure and reserve space for future functional expansion and engineering evolution.
 
