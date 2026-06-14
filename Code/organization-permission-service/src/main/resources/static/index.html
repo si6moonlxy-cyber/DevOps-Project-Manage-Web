@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>基于 DevOps 的通讯企业 IT 项目交付效能度量平台 v1.0.1</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="app" v-cloak>
+    <div v-if="!authResolved" class="boot-screen">
+        <div class="boot-card">
+            <div class="brand-mark brand-mark--large">D</div>
+            <h1>正在加载管理端</h1>
+            <p>系统会自动恢复登录态，并连接五个业务域的演示服务。</p>
+        </div>
+    </div>
+
+    <div v-else-if="!sessionUser" class="login-shell">
+        <form class="login-panel login-panel--compact" @submit.prevent="login">
+            <div class="login-logo">
+                <div class="brand-mark brand-mark--large">D</div>
+            </div>
+
+            <div class="panel-head panel-head--stack">
+                <div>
+                    <span class="eyebrow">Management Login</span>
+                    <h2>管理端登录</h2>
+                </div>
+            </div>
+
+            <label class="form-field">
+                <span>账号</span>
+                <input v-model.trim="loginForm.username" type="text" placeholder="请输入账号">
+            </label>
+
+            <label class="form-field">
+                <span>密码</span>
+                <input v-model.trim="loginForm.password" type="password" placeholder="请输入密码">
+            </label>
+
+            <button class="primary-button" type="submit" :disabled="submitting">
+                {{ submitting ? '登录中...' : '登录' }}
+            </button>
+            <p v-if="message" class="message-text">{{ message }}</p>
+
+            <div class="login-demo-list">
+                <button v-for="demo in demoAccounts" :key="demo.username" type="button" class="demo-chip" @click="fillDemoAccount(demo)">
+                    <strong>{{ demo.roleName }}</strong>
+                    <span>{{ demo.username }} / {{ demo.password }}</span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div v-else class="portal-shell">
+        <aside class="portal-rail">
+            <div class="rail-brand">
+                <div class="brand-mark">D</div>
+            </div>
+
+            <button
+                v-for="module in modules"
+                :key="module.code"
+                class="rail-button"
+                :class="{ 'is-active': module.code === currentModuleCode }"
+                :title="module.name"
+                @click="openModule(module.code)"
+            >
+                <span>{{ module.icon }}</span>
+            </button>
+
+            <div class="rail-bottom">
+                <button class="rail-button rail-button--muted" title="刷新当前页面" @click="refreshCurrentPage">R</button>
+                <button class="rail-button rail-button--muted" title="退出登录" @click="logout">Q</button>
+            </div>
+        </aside>
+
+        <section class="portal-main">
+            <header class="topbar">
+                <nav class="top-tabs">
+                    <button
+                        v-for="module in modules"
+                        :key="module.code"
+                        class="top-tab"
+                        :class="{ 'is-active': module.code === currentModuleCode }"
+                        @click="openModule(module.code)"
+                    >
+                        {{ module.name }}
+                    </button>
+                </nav>
+
+                <div class="top-actions">
+                    <input class="search-box" v-model.trim="globalSearch" type="search" placeholder="Search">
+                    <button class="secondary-button secondary-button--compact" type="button" @click="toggleTheme">{{ themeMode === 'dark' ? 'Light' : 'Dark' }}</button>
+                    <div class="badge-chip">{{ navigation ? navigation.visiblePageCount : 0 }} 页</div>
+                    <button class="user-chip" @click="logout">
+                        <span class="avatar-dot">{{ userInitial }}</span>
+                        <strong>{{ sessionUser.displayName }}</strong>
+                    </button>
+                </div>
+            </header>
+
+            <div class="workspace">
+                <aside class="subnav">
+                    <section class="profile-card">
+                        <div class="avatar-bubble">{{ userInitial }}</div>
+                        <div>
+                            <h3>{{ sessionUser.displayName }}</h3>
+                            <p>{{ navigation ? navigation.todayLabel : '' }}</p>
+                        </div>
+                    </section>
+
+                    <div class="pill-row">
+                        <span class="status-pill">{{ sessionUser.roleName }}</span>
+                        <span class="status-pill status-pill--light">{{ navigation ? navigation.visiblePageCount : 0 }} 页面</span>
+                    </div>
+
+                    <section class="subnav-section">
+                        <h4>{{ currentModule ? currentModule.name : '领域导航' }}</h4>
+                        <button
+                            v-for="page in currentPages"
+                            :key="page.code"
+                            class="subnav-link"
+                            :class="{ 'is-active': page.code === currentPageCode }"
+                            @click="openPage(page.code)"
+                        >
+                            <span>{{ page.icon }}</span>
+                            <strong>{{ page.name }}</strong>
+                        </button>
+                    </section>
+
+                    <section class="subnav-section">
+                        <h4>领域说明</h4>
+                        <p class="subnav-note">{{ currentModule ? currentModule.description : '' }}</p>
+                    </section>
+                </aside>
+
+                <main class="content-pane">
+                    <header class="page-head">
+                        <div>
+                            <span class="eyebrow">{{ currentModule ? currentModule.name : '' }}</span>
+                            <h1>{{ currentPage ? currentPage.name : '' }}</h1>
+                            <p>{{ pageDescription }}</p>
+                        </div>
+                        <button class="secondary-button" @click="refreshCurrentPage" :disabled="pageLoading">
+                            {{ pageLoading ? '加载中...' : '刷新页面' }}
+                        </button>
+                    </header>
+
+                    <section v-if="pageLoading" class="empty-panel">
+                        <div class="empty-icon">...</div>
+                        <h3>页面数据加载中</h3>
+                        <p>正在从对应业务域微服务拉取当前页面数据。</p>
+                    </section>
+
+                    <template v-else>
+                        <template v-if="currentPageCode === 'organization-overview'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="content-grid">
+                                <article class="panel panel--wide">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Teams</span>
+                                            <h2>组织团队分布</h2>
+                                        </div>
+                                    </div>
+                                    <div class="module-panel-grid">
+                                        <article v-for="team in currentPayload.teams || []" :key="team.teamName" class="module-panel">
+                                            <strong>{{ team.teamName }}</strong>
+                                            <p>{{ team.deptName }} · {{ team.focusArea }}</p>
+                                            <small>{{ team.memberCount }} 人</small>
+                                        </article>
+                                    </div>
+                                </article>
+
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Roles</span>
+                                            <h2>角色入口说明</h2>
+                                        </div>
+                                    </div>
+                                    <div class="note-list">
+                                        <article v-for="item in currentPayload.roleGuide || []" :key="item.title" class="note-card">
+                                            <strong>{{ item.title }}</strong>
+                                            <p>{{ item.description }}</p>
+                                        </article>
+                                    </div>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Members</span>
+                                        <h2>非管理成员与团队</h2>
+                                    </div>
+                                    <button class="secondary-button secondary-button--compact" type="button" @click="createMemberForm">新增成员</button>
+                                </div>
+                                <div class="table-tools">
+                                    <input :value="filterText('members')" @input="setFilterText('members', $event.target.value)" placeholder="按成员、账号、团队筛选">
+                                </div>
+                                <div v-if="editForms.member" class="editor-panel">
+                                    <div class="form-grid">
+                                        <label>成员姓名<input v-model.trim="editForms.member.displayName" class="cell-input" :disabled="!!editForms.member.userId"></label>
+                                        <label>账号<input v-model.trim="editForms.member.username" class="cell-input" :disabled="!!editForms.member.userId"></label>
+                                        <label>初始密码<input v-model.trim="editForms.member.password" type="password" class="cell-input" :disabled="!!editForms.member.userId"></label>
+                                        <label>团队
+                                            <select v-model="editForms.member.teamId" class="cell-input">
+                                                <option v-for="team in currentPayload.teams || []" :key="team.teamId" :value="team.teamId">{{ team.teamName }}</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="table-actions">
+                                        <button class="primary-button primary-button--small" type="button" @click="saveMember">保存成员</button>
+                                        <button class="secondary-button secondary-button--compact" type="button" @click="cancelEdit('member')">取消</button>
+                                    </div>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="data-table">
+                                        <thead>
+                                        <tr>
+                                            <th>成员</th>
+                                            <th>账号</th>
+                                            <th>角色</th>
+                                            <th>团队</th>
+                                            <th>状态</th>
+                                            <th>操作</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="member in viewRows('members', currentPayload.members)" :key="member.userId || member.username">
+                                            <td>{{ member.displayName }}</td>
+                                            <td>{{ member.username }}</td>
+                                            <td>{{ member.roleName }}</td>
+                                            <td>{{ member.teamName }}</td>
+                                            <td>{{ member.accountStatus }}</td>
+                                            <td>
+                                                <div class="table-actions">
+                                                    <button class="text-button" type="button" @click="startEdit('member', member)">调整团队</button>
+                                                    <button class="text-button text-button--danger" type="button" @click="deleteMember(member)">移除</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="pager-row">
+                                    <button type="button" @click="changePage('members', -1)">上一页</button>
+                                    <span>{{ pageInfo('members', currentPayload.members).page }} / {{ pageInfo('members', currentPayload.members).pages }} · 共 {{ pageInfo('members', currentPayload.members).total }} 条</span>
+                                    <button type="button" @click="changePage('members', 1)">下一页</button>
+                                </div>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Version Notes</span>
+                                        <h2>v1.0.1 调整说明</h2>
+                                    </div>
+                                </div>
+                                <div class="table-profile-grid">
+                                    <article v-for="item in currentPayload.versionNotes || []" :key="item.title" class="table-profile">
+                                        <strong>{{ item.title }}</strong>
+                                        <p>{{ item.description }}</p>
+                                    </article>
+                                </div>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'permission-center'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="notice-banner">
+                                <strong>权限中心说明</strong>
+                                <p>{{ currentPayload.permissionNotice }}</p>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Accounts</span>
+                                        <h2>管理端账号与角色</h2>
+                                    </div>
+                                </div>
+                                <div class="table-tools">
+                                    <input :value="filterText('accounts')" @input="setFilterText('accounts', $event.target.value)" placeholder="按账号、角色、状态筛选">
+                                </div>
+                                <div v-if="editForms.account" class="editor-panel">
+                                    <div class="form-grid">
+                                        <label>账号<input v-model.trim="editForms.account.username" class="cell-input"></label>
+                                        <label>新密码<input v-model.trim="editForms.account.password" type="password" class="cell-input" placeholder="留空表示不修改"></label>
+                                        <label>角色
+                                            <select v-model="editForms.account.roleId" class="cell-input">
+                                                <option v-for="role in currentPayload.roles || []" :key="role.roleId" :value="role.roleId">{{ role.roleName }}</option>
+                                            </select>
+                                        </label>
+                                        <label>状态
+                                            <select v-model="editForms.account.accountStatus" class="cell-input">
+                                                <option value="ACTIVE">ACTIVE</option>
+                                                <option value="INACTIVE">INACTIVE</option>
+                                                <option value="LOCKED">LOCKED</option>
+                                            </select>
+                                        </label>
+                                        <label class="form-grid__wide">说明<input v-model.trim="editForms.account.description" class="cell-input"></label>
+                                    </div>
+                                    <div class="table-actions">
+                                        <button class="primary-button primary-button--small" type="button" @click="saveAccount(editForms.account)">保存账号</button>
+                                        <button class="secondary-button secondary-button--compact" type="button" @click="cancelEdit('account')">取消</button>
+                                    </div>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="data-table">
+                                        <thead>
+                                        <tr>
+                                            <th>显示名称</th>
+                                            <th>账号</th>
+                                            <th>角色</th>
+                                            <th>状态</th>
+                                            <th>最近登录</th>
+                                            <th>说明</th>
+                                            <th v-if="canEditAccounts()">操作</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="account in viewRows('accounts', currentPayload.accounts)" :key="account.userId || account.username">
+                                            <td>{{ account.displayName }}</td>
+                                            <td>{{ account.username }}</td>
+                                            <td><span class="tag tag-brand">{{ account.roleName }}</span></td>
+                                            <td>{{ account.accountStatus }}</td>
+                                            <td>{{ account.lastLoginAt }}</td>
+                                            <td>{{ account.description }}</td>
+                                            <td v-if="canEditAccounts()">
+                                                <button class="text-button" type="button" @click="startEdit('account', account)">编辑</button>
+                                            </td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="pager-row">
+                                    <button type="button" @click="changePage('accounts', -1)">上一页</button>
+                                    <span>{{ pageInfo('accounts', currentPayload.accounts).page }} / {{ pageInfo('accounts', currentPayload.accounts).pages }} · 共 {{ pageInfo('accounts', currentPayload.accounts).total }} 条</span>
+                                    <button type="button" @click="changePage('accounts', 1)">下一页</button>
+                                </div>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'project-delivery'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Projects</span>
+                                            <h2>项目交付看板</h2>
+                                        </div>
+                                        <button v-if="canEditProjects()" class="secondary-button secondary-button--compact" type="button" @click="createProjectForm">新增项目</button>
+                                    </div>
+                                    <div class="table-tools">
+                                        <input :value="filterText('projects')" @input="setFilterText('projects', $event.target.value)" placeholder="按项目、负责人、状态筛选">
+                                    </div>
+                                    <div v-if="editForms.project" class="editor-panel">
+                                        <div class="form-grid">
+                                            <label>项目编码<input v-model.trim="editForms.project.projectCode" class="cell-input"></label>
+                                            <label>项目名称<input v-model.trim="editForms.project.projectName" class="cell-input"></label>
+                                            <label>业务域<input v-model.trim="editForms.project.businessDomain" class="cell-input"></label>
+                                            <label>状态
+                                                <select v-model="editForms.project.statusCode" class="cell-input">
+                                                    <option value="PLANNING">规划中</option>
+                                                    <option value="RUNNING">执行中</option>
+                                                    <option value="ONLINE">稳定运行</option>
+                                                    <option value="CLOSED">已关闭</option>
+                                                </select>
+                                            </label>
+                                            <label class="form-grid__wide">说明<input v-model.trim="editForms.project.description" class="cell-input"></label>
+                                        </div>
+                                        <div class="table-actions">
+                                            <button class="primary-button primary-button--small" type="button" @click="saveProject">保存项目</button>
+                                            <button class="secondary-button secondary-button--compact" type="button" @click="cancelEdit('project')">取消</button>
+                                        </div>
+                                    </div>
+                                    <div class="table-wrap">
+                                        <table class="data-table">
+                                            <thead>
+                                            <tr>
+                                                <th>项目</th>
+                                                <th>负责人</th>
+                                                <th>业务域</th>
+                                                <th>状态</th>
+                                                <th>阶段</th>
+                                                <th>进度</th>
+                                                <th>版本</th>
+                                                <th>计划上线</th>
+                                                <th v-if="canEditProjects()">操作</th>
+                                            </tr>
+                                            </thead>
+                                            <tbody>
+                                            <tr v-for="project in viewRows('projects', currentPayload.projects)" :key="project.projectId || project.projectName + project.planGoLive">
+                                                <td>{{ project.projectName }}</td>
+                                                <td>{{ project.managerName }}</td>
+                                                <td>{{ project.businessDomain }}</td>
+                                                <td><span class="tag" :class="riskClass(project.riskLevel)">{{ project.status }}</span></td>
+                                                <td>{{ project.deliveryStage }}</td>
+                                                <td>
+                                                    <div class="progress-wrap">
+                                                        <span>{{ project.progress }}%</span>
+                                                        <div class="inline-progress"><span :style="{ width: project.progress + '%' }"></span></div>
+                                                    </div>
+                                                </td>
+                                                <td>{{ project.currentVersion }}</td>
+                                                <td>{{ project.planGoLive }}</td>
+                                                <td v-if="canEditProjects()">
+                                                    <div class="table-actions">
+                                                        <button class="text-button" type="button" @click="startEdit('project', project)">编辑</button>
+                                                        <button class="text-button text-button--danger" type="button" @click="deleteProject(project)">归档</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="pager-row">
+                                        <button type="button" @click="changePage('projects', -1)">上一页</button>
+                                        <span>{{ pageInfo('projects', currentPayload.projects).page }} / {{ pageInfo('projects', currentPayload.projects).pages }} · 共 {{ pageInfo('projects', currentPayload.projects).total }} 条</span>
+                                        <button type="button" @click="changePage('projects', 1)">下一页</button>
+                                    </div>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Status</span>
+                                        <h2>项目状态分布</h2>
+                                    </div>
+                                </div>
+                                <div id="projectStatusChart" class="chart chart--small"></div>
+                            </section>
+
+                            <section class="content-grid">
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Milestones</span>
+                                            <h2>近期里程碑</h2>
+                                        </div>
+                                    </div>
+                                    <div class="stack-list">
+                                        <article v-for="item in currentPayload.milestones || []" :key="item.projectName + item.planGoLive" class="stack-item">
+                                            <strong>{{ item.projectName }}</strong>
+                                            <p>{{ item.deliveryStage }}</p>
+                                            <small>计划上线 {{ item.planGoLive }}</small>
+                                            <div class="inline-progress"><span :style="{ width: item.progress + '%' }"></span></div>
+                                        </article>
+                                    </div>
+                                </article>
+
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Activities</span>
+                                            <h2>近期交付动态</h2>
+                                        </div>
+                                    </div>
+                                    <div class="timeline-list">
+                                        <div v-for="item in currentPayload.recentActivities || []" :key="item.activityTitle + item.occurredAt" class="timeline-item">
+                                            <div class="timeline-badge">{{ item.activityType }}</div>
+                                            <div class="timeline-content">
+                                                <strong>{{ item.activityTitle }}</strong>
+                                                <p>{{ item.projectName }} · {{ item.ownerName }}</p>
+                                                <small>{{ item.occurredAt }} · {{ item.activityStatus }}</small>
+                                                <span>{{ item.detailText }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </article>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'work-item-center'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Work Items</span>
+                                            <h2>工作项清单</h2>
+                                        </div>
+                                        <button v-if="canEditProjects()" class="secondary-button secondary-button--compact" type="button" @click="createWorkItemForm">新增工作项</button>
+                                    </div>
+                                    <div class="table-tools">
+                                        <input :value="filterText('workItems')" @input="setFilterText('workItems', $event.target.value)" placeholder="按项目、标题、负责人、状态筛选">
+                                    </div>
+                                    <div v-if="editForms.workItem" class="editor-panel">
+                                        <div class="form-grid">
+                                            <label>所属项目
+                                                <select v-model="editForms.workItem.projectId" class="cell-input">
+                                                    <option v-for="project in currentPayload.projects || []" :key="project.projectId" :value="project.projectId">{{ project.projectName }}</option>
+                                                </select>
+                                            </label>
+                                            <label class="form-grid__wide">工作项标题<input v-model.trim="editForms.workItem.itemTitle" class="cell-input"></label>
+                                            <label>类型
+                                                <select v-model="editForms.workItem.itemTypeCode" class="cell-input">
+                                                    <option value="REQUIREMENT">需求</option>
+                                                    <option value="TASK">任务</option>
+                                                    <option value="BUG">缺陷</option>
+                                                </select>
+                                            </label>
+                                            <label>优先级
+                                                <select v-model="editForms.workItem.priority" class="cell-input">
+                                                    <option value="HIGH">高</option>
+                                                    <option value="MEDIUM">中</option>
+                                                    <option value="LOW">低</option>
+                                                </select>
+                                            </label>
+                                            <label>状态
+                                                <select v-model="editForms.workItem.statusCode" class="cell-input">
+                                                    <option value="TODO">待处理</option>
+                                                    <option value="IN_PROGRESS">进行中</option>
+                                                    <option value="TESTING">测试中</option>
+                                                    <option value="DONE">已完成</option>
+                                                </select>
+                                            </label>
+                                            <label>负责人<input v-model.trim="editForms.workItem.ownerName" class="cell-input"></label>
+                                        </div>
+                                        <div class="table-actions">
+                                            <button class="primary-button primary-button--small" type="button" @click="saveWorkItem">保存工作项</button>
+                                            <button class="secondary-button secondary-button--compact" type="button" @click="cancelEdit('workItem')">取消</button>
+                                        </div>
+                                    </div>
+                                    <div class="table-wrap">
+                                        <table class="data-table">
+                                            <thead>
+                                            <tr>
+                                                <th>项目 / 工作项</th>
+                                                <th>类型</th>
+                                                <th>优先级</th>
+                                                <th>负责人</th>
+                                                <th>Sprint</th>
+                                                <th>状态</th>
+                                                <th>进度</th>
+                                                <th>截止时间</th>
+                                                <th v-if="canEditProjects()">操作</th>
+                                            </tr>
+                                            </thead>
+                                            <tbody>
+                                            <tr v-for="item in viewRows('workItems', currentPayload.items)" :key="item.itemId || item.projectName + item.itemTitle">
+                                                <td>
+                                                    <strong>{{ item.itemTitle }}</strong>
+                                                    <small>{{ item.projectName }}</small>
+                                                </td>
+                                                <td>{{ item.itemType }}</td>
+                                                <td><span class="tag" :class="priorityClass(item.priorityLevel)">{{ item.priorityLevel }}</span></td>
+                                                <td>{{ item.ownerName }}</td>
+                                                <td>{{ item.sprintName }}</td>
+                                                <td>{{ item.itemStatus }}</td>
+                                                <td>
+                                                    <div class="progress-wrap">
+                                                        <span>{{ item.progress }}%</span>
+                                                        <div class="inline-progress"><span :style="{ width: item.progress + '%' }"></span></div>
+                                                    </div>
+                                                </td>
+                                                <td>{{ item.dueDate }}</td>
+                                                <td v-if="canEditProjects()">
+                                                    <div class="table-actions">
+                                                        <button class="text-button" type="button" @click="startEdit('workItem', item)">编辑</button>
+                                                        <button class="text-button text-button--danger" type="button" @click="deleteWorkItem(item)">删除</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="pager-row">
+                                        <button type="button" @click="changePage('workItems', -1)">上一页</button>
+                                        <span>{{ pageInfo('workItems', currentPayload.items).page }} / {{ pageInfo('workItems', currentPayload.items).pages }} · 共 {{ pageInfo('workItems', currentPayload.items).total }} 条</span>
+                                        <button type="button" @click="changePage('workItems', 1)">下一页</button>
+                                    </div>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Status</span>
+                                        <h2>工作项状态</h2>
+                                    </div>
+                                </div>
+                                <div id="workItemStatusChart" class="chart chart--small"></div>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'devops-overview'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="content-grid">
+                                <article class="panel panel--wide">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Sources</span>
+                                        <h2>数据源接入展示</h2>
+                                        </div>
+                                    </div>
+                                    <div class="table-tools">
+                                        <input :value="filterText('sources')" @input="setFilterText('sources', $event.target.value)" placeholder="按数据源、类型、状态筛选">
+                                    </div>
+                                    <div v-if="editForms.source" class="editor-panel">
+                                        <div class="form-grid">
+                                            <label>数据源<input v-model.trim="editForms.source.sourceName" class="cell-input" disabled></label>
+                                            <label class="form-grid__wide">API 地址<input v-model.trim="editForms.source.endpointUrl" class="cell-input"></label>
+                                            <label>是否展示
+                                                <select v-model="editForms.source.visible" class="cell-input">
+                                                    <option :value="true">展示</option>
+                                                    <option :value="false">隐藏</option>
+                                                </select>
+                                            </label>
+                                            <label class="form-grid__wide">说明<input v-model.trim="editForms.source.remark" class="cell-input"></label>
+                                        </div>
+                                        <div class="table-actions">
+                                            <button class="primary-button primary-button--small" type="button" @click="saveSource(editForms.source)">保存数据源</button>
+                                            <button class="secondary-button secondary-button--compact" type="button" @click="cancelEdit('source')">取消</button>
+                                        </div>
+                                    </div>
+                                    <div class="source-grid">
+                                        <article v-for="source in viewRows('sources', currentPayload.sources)" :key="source.sourceId || source.sourceName" class="source-card">
+                                            <div class="event-row">
+                                                <strong>{{ source.sourceName }}</strong>
+                                                <span class="tag" :class="sourceClass(source.syncStatus)">{{ source.syncStatus }}</span>
+                                            </div>
+                                            <p>{{ source.sourceType }} · 负责人 {{ source.syncOwner }}</p>
+                                            <small>{{ source.endpointUrl }}</small>
+                                            <small>最近同步 {{ source.lastSyncTime }}</small>
+                                            <em>当日增量 {{ source.todayIncrement }} 条 · 健康度 {{ source.apiHealth }}%</em>
+                                            <div class="table-actions">
+                                                <button class="text-button" type="button" @click="editSource(source)">编辑</button>
+                                            </div>
+                                        </article>
+                                    </div>
+                                    <div class="pager-row">
+                                        <button type="button" @click="changePage('sources', -1)">上一页</button>
+                                        <span>{{ pageInfo('sources', currentPayload.sources).page }} / {{ pageInfo('sources', currentPayload.sources).pages }} · 共 {{ pageInfo('sources', currentPayload.sources).total }} 条</span>
+                                        <button type="button" @click="changePage('sources', 1)">下一页</button>
+                                    </div>
+                                </article>
+
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Status</span>
+                                            <h2>在线状态分布</h2>
+                                        </div>
+                                    </div>
+                                    <div id="sourceStatusChart" class="chart chart--small"></div>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Domain Tips</span>
+                                        <h2>业务域说明</h2>
+                                    </div>
+                                </div>
+                                <div class="table-profile-grid">
+                                    <article v-for="tip in currentPayload.domainTips || []" :key="tip.title" class="table-profile">
+                                        <strong>{{ tip.title }}</strong>
+                                        <p>{{ tip.description }}</p>
+                                    </article>
+                                </div>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'collection-pipeline'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="content-grid">
+                                <article class="panel panel--wide">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Pipeline Tasks</span>
+                                            <h2>采集任务清单</h2>
+                                        </div>
+                                    </div>
+                                    <div class="table-wrap">
+                                        <table class="data-table">
+                                            <thead>
+                                            <tr>
+                                                <th>任务名</th>
+                                                <th>数据源</th>
+                                                <th>Cron</th>
+                                                <th>状态</th>
+                                                <th>最近执行</th>
+                                                <th>下次执行</th>
+                                            </tr>
+                                            </thead>
+                                            <tbody>
+                                            <tr v-for="task in currentPayload.tasks || []" :key="task.taskName">
+                                                <td>{{ task.taskName }}</td>
+                                                <td>{{ task.sourceName }}</td>
+                                                <td>{{ task.scheduleExpr }}</td>
+                                                <td><span class="tag" :class="sourceClass(task.taskStatus)">{{ task.taskStatus }}</span></td>
+                                                <td>{{ task.lastRunTime }}</td>
+                                                <td>{{ task.nextRunTime }}</td>
+                                            </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </article>
+
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Steps</span>
+                                            <h2>链路阶段</h2>
+                                        </div>
+                                    </div>
+                                    <div class="stack-list">
+                                        <article v-for="step in currentPayload.pipelineSteps || []" :key="step.title" class="stack-item">
+                                            <strong>{{ step.title }}</strong>
+                                            <p>{{ step.description }}</p>
+                                        </article>
+                                    </div>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Quality Checks</span>
+                                        <h2>数据质量巡检</h2>
+                                    </div>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="data-table">
+                                        <thead>
+                                        <tr>
+                                            <th>数据源</th>
+                                            <th>规则名称</th>
+                                            <th>目标对象</th>
+                                            <th>严重级别</th>
+                                            <th>问题数量</th>
+                                            <th>最近发现</th>
+                                            <th>规则状态</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="item in currentPayload.qualityChecks || []" :key="item.sourceName + item.ruleName">
+                                            <td>{{ item.sourceName }}</td>
+                                            <td>{{ item.ruleName }}</td>
+                                            <td>{{ item.targetObject }}</td>
+                                            <td>
+                                                <span class="tag" :class="item.severity === 'HIGH' ? 'tag-danger' : (item.severity === 'MEDIUM' ? 'tag-warning' : 'tag-success')">
+                                                    {{ item.severity }}
+                                                </span>
+                                            </td>
+                                            <td>{{ item.issueCount }}</td>
+                                            <td>{{ item.latestDetectedAt }}</td>
+                                            <td>{{ item.enabledStatus }}</td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'metrics-overview'">
+                            <section class="card-grid card-grid--wide">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>目标 {{ card.target }}{{ card.unit }} · {{ formatDelta(card.delta) }}</p>
+                                </article>
+                            </section>
+
+                            <section class="content-grid">
+                                <article class="panel panel--wide">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Trend</span>
+                                            <h2>核心指标趋势</h2>
+                                        </div>
+                                    </div>
+                                    <div id="metricTrendChart" class="chart"></div>
+                                </article>
+
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Domain Tips</span>
+                                            <h2>指标域说明</h2>
+                                        </div>
+                                    </div>
+                                    <div class="stack-list">
+                                        <article v-for="tip in currentPayload.domainTips || []" :key="tip.title" class="stack-item">
+                                            <strong>{{ tip.title }}</strong>
+                                            <p>{{ tip.description }}</p>
+                                        </article>
+                                    </div>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Catalog</span>
+                                        <h2>指标口径与最新结果</h2>
+                                    </div>
+                                </div>
+                                <div class="metric-list">
+                                    <div v-for="metric in currentPayload.metricCatalog || []" :key="metric.metricCode" class="metric-row">
+                                        <div>
+                                            <strong>{{ metric.metricName }}</strong>
+                                            <p>{{ metric.metricCode }} · 目标 {{ metric.targetValue }}{{ metric.unitName }}</p>
+                                        </div>
+                                        <div class="metric-value">
+                                            <strong>{{ metric.metricValue }}</strong>
+                                            <span>{{ metric.unitName }}</span>
+                                        </div>
+                                        <span class="tag" :class="warningClass(metric.warningLevel)">{{ metric.warningLevel }}</span>
+                                    </div>
+                                </div>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'report-center'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="content-grid">
+                                <article class="panel panel--wide">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Scores</span>
+                                            <h2>报表历史评分趋势</h2>
+                                        </div>
+                                    </div>
+                                    <div id="reportScoreChart" class="chart"></div>
+                                </article>
+
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Reports</span>
+                                            <h2>报表历史记录</h2>
+                                        </div>
+                                    </div>
+                                    <div class="stack-list">
+                                        <article v-for="report in currentPayload.reports || []" :key="report.reportName + report.generatedAt" class="stack-item">
+                                            <div class="event-row">
+                                                <strong>{{ report.reportName }}</strong>
+                                                <span class="tag tag-brand">{{ report.status }}</span>
+                                            </div>
+                                            <p>{{ report.reportCycle }} · {{ report.reportType }}</p>
+                                            <small>{{ report.scopeName }} · {{ report.ownerName }}</small>
+                                            <em>{{ report.generatedAt }} · {{ report.qualityScore }} 分</em>
+                                        </article>
+                                    </div>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Alerts</span>
+                                        <h2>指标预警记录</h2>
+                                    </div>
+                                </div>
+                                <div class="stack-list">
+                                    <article v-for="alert in currentPayload.metricAlerts || []" :key="alert.metricName + alert.triggeredAt" class="stack-item">
+                                        <div class="event-row">
+                                            <strong>{{ alert.metricName }}</strong>
+                                            <span class="tag" :class="warningClass(alert.warningLevel)">{{ alert.warningLevel }}</span>
+                                        </div>
+                                        <p>{{ alert.scopeName }} · {{ alert.status }}</p>
+                                        <small>{{ alert.triggeredAt }}</small>
+                                        <em>{{ alert.alertMessage }}</em>
+                                    </article>
+                                </div>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'audit-events'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="content-grid">
+                                <article class="panel panel--wide">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Alerts</span>
+                                            <h2>告警与恢复事件</h2>
+                                        </div>
+                                    </div>
+                                    <div class="stack-list">
+                                        <article v-for="alert in currentPayload.alerts || []" :key="alert.domainName + alert.alertName + alert.triggeredAt" class="stack-item">
+                                            <div class="event-row">
+                                                <strong>{{ alert.alertName }}</strong>
+                                                <span class="tag" :class="alertClass(alert.alertLevel)">{{ alert.alertLevel }}</span>
+                                            </div>
+                                            <p>{{ alert.domainName }} · {{ alert.impactScope }}</p>
+                                            <small>{{ alert.sourceService }} · {{ alert.ownerName }}</small>
+                                            <em>{{ alert.triggeredAt }} / {{ alert.recoveredAt }}</em>
+                                        </article>
+                                    </div>
+                                </article>
+
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Levels</span>
+                                            <h2>告警等级分布</h2>
+                                        </div>
+                                    </div>
+                                    <div id="alertLevelChart" class="chart chart--small"></div>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Login Logs</span>
+                                        <h2>登录审计记录</h2>
+                                    </div>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="data-table">
+                                        <thead>
+                                        <tr>
+                                            <th>账号</th>
+                                            <th>角色</th>
+                                            <th>登录状态</th>
+                                            <th>IP 地址</th>
+                                            <th>登录时间</th>
+                                            <th>失败原因</th>
+                                            <th>客户端</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="log in currentPayload.loginLogs || []" :key="log.username + log.loginAt + log.ipAddress">
+                                            <td>{{ log.username }}</td>
+                                            <td>{{ log.roleName }}</td>
+                                            <td>{{ log.loginStatus }}</td>
+                                            <td>{{ log.ipAddress }}</td>
+                                            <td>{{ log.loginAt }}</td>
+                                            <td>{{ log.failureReason }}</td>
+                                            <td>{{ log.userAgent }}</td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Operation Logs</span>
+                                        <h2>最近操作审计</h2>
+                                    </div>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="data-table">
+                                        <thead>
+                                        <tr>
+                                            <th>操作人</th>
+                                            <th>模块</th>
+                                            <th>类型</th>
+                                            <th>目标</th>
+                                            <th>结果码</th>
+                                            <th>时间</th>
+                                            <th>说明</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="log in currentPayload.operationLogs || []" :key="log.operatorName + log.occurredAt + log.targetName">
+                                            <td>{{ log.operatorName }}</td>
+                                            <td>{{ log.operatorRole }}</td>
+                                            <td>{{ log.operationType }}</td>
+                                            <td>{{ log.targetName }}</td>
+                                            <td>{{ log.operationResult }}</td>
+                                            <td>{{ log.occurredAt }}</td>
+                                            <td>{{ log.operationDetail }}</td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        </template>
+
+                        <template v-else-if="currentPageCode === 'config-console'">
+                            <section class="card-grid">
+                                <article v-for="card in currentPayload.summaryCards || []" :key="card.title" class="stat-card" :class="'tone-' + (card.tone || 'brand')">
+                                    <span>{{ card.title }}</span>
+                                    <strong>{{ card.value }}<em>{{ card.unit }}</em></strong>
+                                    <p>{{ card.description }}</p>
+                                </article>
+                            </section>
+
+                            <section class="content-grid">
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Runtime Engine</span>
+                                            <h2>演示运行库</h2>
+                                        </div>
+                                    </div>
+                                    <div class="detail-list">
+                                        <div class="detail-row"><span>数据库引擎</span><strong>{{ currentPayload.engineInfo ? currentPayload.engineInfo.engineName : '--' }}</strong></div>
+                                        <div class="detail-row"><span>运行模式</span><strong>{{ currentPayload.engineInfo ? currentPayload.engineInfo.mode : '--' }}</strong></div>
+                                        <div class="detail-row"><span>JDBC URL</span><strong>{{ currentPayload.engineInfo ? currentPayload.engineInfo.jdbcUrl : '--' }}</strong></div>
+                                        <div class="detail-row"><span>Schema</span><strong>{{ currentPayload.engineInfo ? currentPayload.engineInfo.schema : '--' }}</strong></div>
+                                        <div class="detail-row"><span>最近刷新</span><strong>{{ currentPayload.engineInfo ? currentPayload.engineInfo.lastRefreshTime : '--' }}</strong></div>
+                                    </div>
+                                </article>
+
+                                <article class="panel">
+                                    <div class="panel-head">
+                                        <div>
+                                            <span class="panel-eyebrow">Target Database</span>
+                                            <h2>需求书目标库配置</h2>
+                                        </div>
+                                    </div>
+                                    <div class="detail-list">
+                                        <div class="detail-row"><span>数据库类型</span><strong>{{ currentPayload.targetDatabase ? currentPayload.targetDatabase.databaseType : '--' }}</strong></div>
+                                        <div class="detail-row"><span>JDBC URL</span><strong>{{ currentPayload.targetDatabase ? currentPayload.targetDatabase.jdbcUrl : '--' }}</strong></div>
+                                        <div class="detail-row"><span>用户名</span><strong>{{ currentPayload.targetDatabase ? currentPayload.targetDatabase.username : '--' }}</strong></div>
+                                        <div class="detail-row"><span>密码展示</span><strong>{{ currentPayload.targetDatabase ? currentPayload.targetDatabase.passwordMask : '--' }}</strong></div>
+                                    </div>
+                                    <p class="panel-desc">{{ currentPayload.targetDatabase ? currentPayload.targetDatabase.description : '' }}</p>
+                                </article>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Service Registry</span>
+                                        <h2>五个业务域微服务</h2>
+                                    </div>
+                                </div>
+                                <div class="source-grid">
+                                    <article v-for="service in currentPayload.serviceRegistry || []" :key="service.serviceCode" class="source-card">
+                                        <div class="event-row">
+                                            <strong>{{ service.serviceName }}</strong>
+                                            <span class="tag" :class="sourceClass(service.runStatus)">{{ service.runStatus }}</span>
+                                        </div>
+                                        <p>{{ service.serviceCode }}</p>
+                                        <small>{{ service.baseUrl }} · 端口 {{ service.portNo }}</small>
+                                        <em>{{ service.responsibility }}</em>
+                                    </article>
+                                </div>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Config Items</span>
+                                        <h2>配置台账</h2>
+                                    </div>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="data-table">
+                                        <thead>
+                                        <tr>
+                                            <th>分组</th>
+                                            <th>键</th>
+                                            <th>值</th>
+                                            <th>状态</th>
+                                            <th>更新时间</th>
+                                            <th>说明</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="item in currentPayload.configItems || []" :key="item.configGroup + item.configKey">
+                                            <td>{{ item.configGroup }}</td>
+                                            <td>{{ item.configKey }}</td>
+                                            <td>{{ item.configValue }}</td>
+                                            <td>{{ item.configState }}</td>
+                                            <td>{{ item.updatedAt }}</td>
+                                            <td>{{ item.description }}</td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Query Console</span>
+                                        <h2>精简版只读数据库控制台</h2>
+                                    </div>
+                                </div>
+                                <p class="panel-desc">{{ currentPayload.readOnlyTip }}</p>
+                                <div class="chip-row">
+                                    <button v-for="sql in currentPayload.sampleSqls || []" :key="sql" class="sample-chip" @click="runSampleSql(sql)">
+                                        {{ sql }}
+                                    </button>
+                                </div>
+                                <textarea v-model="queryForm.sql" class="query-editor" placeholder="请输入 SELECT 或 WITH 查询语句"></textarea>
+                                <div class="query-actions">
+                                    <button class="primary-button primary-button--small" @click="executeQuery" :disabled="queryLoading">
+                                        {{ queryLoading ? '执行中...' : '执行查询' }}
+                                    </button>
+                                    <span v-if="queryMessage" class="helper-text">{{ queryMessage }}</span>
+                                </div>
+                                <div class="table-wrap" v-if="queryResult.columns && queryResult.columns.length">
+                                    <table class="data-table">
+                                        <thead>
+                                        <tr>
+                                            <th v-for="column in queryResult.columns" :key="column">{{ column }}</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="(row, rowIndex) in queryResult.rows" :key="rowIndex">
+                                            <td v-for="column in queryResult.columns" :key="column">{{ row[column] }}</td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+
+                            <section class="panel">
+                                <div class="panel-head">
+                                    <div>
+                                        <span class="panel-eyebrow">Table Profiles</span>
+                                        <h2>核心表结构概览</h2>
+                                    </div>
+                                </div>
+                                <div class="table-profile-grid">
+                                    <article v-for="table in currentPayload.tableProfiles || []" :key="table.tableName" class="table-profile">
+                                        <strong>{{ table.tableName }}</strong>
+                                        <p>{{ table.description }}</p>
+                                        <small>{{ table.rowCount }} 行 · {{ table.columnCount }} 列</small>
+                                    </article>
+                                </div>
+                            </section>
+                        </template>
+                    </template>
+                </main>
+            </div>
+        </section>
+    </div>
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/vendor/echarts.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

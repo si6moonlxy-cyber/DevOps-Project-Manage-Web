@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.7.18</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.graduate</groupId>
+    <artifactId>delivery-metrics-platform</artifactId>
+    <version>1.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>delivery-metrics-platform</name>
+    <description>DevOps-based IT project delivery performance measurement platform</description>
+
+    <modules>
+        <module>database-bootstrap</module>
+        <module>organization-permission-service</module>
+        <module>project-delivery-service</module>
+        <module>devops-data-service</module>
+        <module>metrics-report-service</module>
+        <module>audit-config-service</module>
+    </modules>
+
+    <properties>
+        <java.version>1.8</java.version>
+        <mysql.connector.version>8.0.19</mysql.connector.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.compiler.useIncrementalCompilation>false</maven.compiler.useIncrementalCompilation>
+    </properties>
+</project>

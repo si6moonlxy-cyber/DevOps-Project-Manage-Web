@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="OrganizationPermissionApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="organization-permission-service" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.graduate.organization.OrganizationPermissionApplication" />
+    <option name="ALTERNATIVE_JRE_PATH" value="D:\java\jdk1.8" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
